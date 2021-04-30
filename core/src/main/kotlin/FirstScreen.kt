@@ -1,4 +1,5 @@
 import FirstScreen.Kind
+import FirstScreen.Kind.BOMB
 import FirstScreen.Kind.ENEMY
 import FirstScreen.Kind.MISSILE
 import FirstScreen.Kind.PLAYER
@@ -24,6 +25,7 @@ import com.badlogic.gdx.scenes.scene2d.Stage
 import com.badlogic.gdx.scenes.scene2d.actions.Actions
 import com.badlogic.gdx.utils.Logger
 import com.badlogic.gdx.utils.Logger.INFO
+import com.badlogic.gdx.utils.TimeUtils
 import com.badlogic.gdx.utils.viewport.FitViewport
 import ktx.actors.then
 import ktx.assets.Asset
@@ -36,16 +38,21 @@ val logger = Logger("1st", INFO)
 /** First screen of the application. Displayed after the application is created.  */
 class FirstScreen(
   private val missile: Asset<Texture>,
-  private val enemyShip: Asset<Texture>,
+  private val bomb: Asset<Texture>,
+  val enemyShip: Asset<Texture>,
   val playerShip: Asset<Texture>
 ) : Screen {
   enum class Kind {
-    UNSET, PLAYER, ENEMY, MISSILE
+    UNSET, PLAYER, ENEMY, MISSILE, BOMB
   }
 
-  private var enemiesDestroyed = 0
   private lateinit var font: BitmapFont
   private lateinit var player: SpaceActor
+
+  private var enemiesDestroyed = 0
+  private val enemyBombInterval = 2000L
+  private var timeSinceLastBomb: Long = enemyBombInterval * 2
+
   private val camera = OrthographicCamera()
   private val viewport = FitViewport(160f, 120f)
   private val stage = Stage(viewport)
@@ -55,22 +62,20 @@ class FirstScreen(
     font = BitmapFont()
 
     missile.finishLoading()
-    enemyShip.finishLoading()
+    bomb.finishLoading()
     playerShip.finishLoading()
+    enemyShip.finishLoading()
 
     camera.setToOrtho(false, 160f, 120f)
     camera.update()
 
-    // Prepare your screen here.
     stage.actors {
       actor(SpaceActor(playerShip, PLAYER, missile)) {
         player = this
-//        stage.addActor(missiles)
       }
       repeat(6) { i ->
         actor(SpaceActor(enemyShip, ENEMY)) {
           setPosition(i * 25f, 100f)
-//          enemyGroup.addActor(this)
           addAction(
             Actions.forever(
               Actions.sequence(
@@ -88,39 +93,62 @@ class FirstScreen(
     check(stage.actors.size > 6)
   }
 
+  private fun Actor.getRect(rect: Rectangle): Rectangle =
+    rect.set(this.x, this.y, this.width, this.height)
+
+
   override fun render(delta: Float) {
+    val enemyRect = Rectangle()
+    val missileRect = Rectangle()
+
+    val spaceActors: Map<Kind, List<SpaceActor>> =
+      stage.actors.filterIsInstance<SpaceActor>().groupBy { it.kind }
+
+    val collisions = mutableMapOf<SpaceActor, SpaceActor>()
+    spaceActors[MISSILE]?.onEach { missile ->
+      missileRect.set(missile.x, missile.y, missile.width, missile.height)
+      spaceActors[ENEMY]?.onEach { enemy ->
+        enemyRect.set(enemy.x, enemy.y, enemy.width, enemy.height)
+        if (enemyRect.overlaps(missileRect)) collisions += missile to enemy
+      }
+    }
+
+    collisions.onEach { (projectile, target) ->
+      projectile.isVisible = false
+      maybeBlowUp(target)
+      stage.actors.removeValue(projectile, true)
+      stage.actors.removeValue(target, true)
+      player.missiles.removeValue(projectile, true)
+    }
+
+    spaceActors[MISSILE].orEmpty().onEach {
+      if (it.y > stage.height) {
+        stage.actors.removeValue(it, true)
+        player.missiles.removeValue(it, true)
+        logger.info("removed $it ${it.kind}")
+      }
+    }
+
+    if (timeSinceLastBomb >= enemyBombInterval) {
+      stage.actors.filterIsInstance<SpaceActor>().random().apply {
+        dropBomb(x + (width / 2), y)
+      }
+    }
+    timeSinceLastBomb = TimeUtils.millis()
+
+    with(stage) {
+      act(delta)
+      draw()
+    }
+
     stage.batch.begin()
     font.draw(
       stage.batch,
       "SCORE: $enemiesDestroyed",
       10f,
-      viewport.screenHeight - font.capHeight
+      50f
     )
     stage.batch.end()
-
-    val enemyRect = Rectangle()
-    val missileRect = Rectangle()
-
-//    // yes n^2 b/c n is not much more than 10 :P
-//    val maybeHits = stage.actors.filter { enemyActor ->
-//      if (enemyActor !is SpaceActor || enemyActor.kind != ENEMY) return
-//      enemyRect.set(enemyActor.x, enemyActor.y, enemyActor.width, enemyActor.height)
-//      return@filter player.missiles.any { actor ->
-//        missileRect.set(actor.x, actor.y, actor.width, actor.height)
-//        enemyRect.overlaps(missileRect).also { logger.info("hit? $actor") }
-//      }
-//
-//    }
-//
-//    maybeHits.onEach { hitActor ->
-//      maybeBlowUp(hitActor as SpaceActor)
-//      stage.actors.removeValue(hitActor, true)
-//    }
-//
-    with(stage) {
-      act(delta)
-      draw()
-    }
   }
 
   private fun maybeBlowUp(enemy: SpaceActor?) {
@@ -134,10 +162,10 @@ class FirstScreen(
       Actions.addAction(
         Actions.repeat(
           5,
-          Actions.rotateBy(0.3f)
+          Actions.rotateBy(5f)
         ).then(
           Actions.alpha(0f, 0.5f, Interpolation.fastSlow)
-            .then(Actions.run { enemy.isVisible = false })
+            .then(Actions.run { enemy.remove() })
         )
       )
     )
@@ -170,6 +198,8 @@ class SpaceActor(
   val kind: Kind,
   private val missile: Asset<Texture>? = null,
   val missiles: GdxArray<SpaceActor> = GdxArray(),
+  private val bomb: Asset<Texture>? = null,
+  val bombs: GdxArray<SpaceActor> = GdxArray()
 ) : Actor() {
   val speed: Float = 3f
 
@@ -182,6 +212,19 @@ class SpaceActor(
     super.draw(batch, parentAlpha)
   }
 
+  fun dropBomb(initX: Float, initY: Float): SpaceActor? {
+    if (bomb == null || bombs.size > 0) return null
+    val newBomb: SpaceActor
+    stage.actors {
+      actor(SpaceActor(texture = bomb, kind = BOMB)) {
+        setPosition(initX, initY)
+        addAction(Actions.forever(Actions.moveBy(0f, -0.5f)))
+      }.also { newBomb = it }
+    }
+    return newBomb
+
+  }
+
   fun fireMissile(initX: Float, initY: Float): SpaceActor? {
     if (missile == null || missiles.size > 2) return null
     val newMissile: SpaceActor
@@ -191,7 +234,7 @@ class SpaceActor(
         addAction(Actions.forever(Actions.moveBy(0f, 0.5f)))
       }.also { newMissile = it }
     }
-    return newMissile
+    return newMissile.also { missiles.add(it) }
   }
 }
 
@@ -216,7 +259,6 @@ class PlayerInputListener(private val player: SpaceActor) : InputListener() {
       DOWN -> player.addAction(Actions.moveBy(0f, -player.speed)).also { this.state = MOVING }
       LEFT -> player.addAction(Actions.moveBy(-player.speed, 0f)).also { this.state = MOVING }
       SPACE -> player.fireMissile(player.x + (player.width / 4), player.top)
-        .also { player.missiles.add(it) }
     }
     return true
   }

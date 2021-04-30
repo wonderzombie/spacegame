@@ -10,10 +10,11 @@ class SpaceGame : KtxGame<FirstScreen>() {
 
   override fun create() {
     val missile = assetManager.loadAsset(assetDescriptor<Texture>("Missile.png"))
+    val bomb = assetManager.loadAsset(assetDescriptor<Texture>("Bomb.png"))
     val enemyShip = assetManager.loadAsset(assetDescriptor<Texture>("EnemyShip01.png"))
     val playerShip = assetManager.loadAsset(assetDescriptor<Texture>("PlayerShip01.png"))
 
-    addScreen(FirstScreen(missile, enemyShip, playerShip))
+    addScreen(FirstScreen(missile, bomb, enemyShip, playerShip))
     setScreen(FirstScreen::class.java)
   }
 }
