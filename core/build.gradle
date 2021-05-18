@@ -23,4 +23,5 @@ dependencies {
 	api "io.github.libktx:ktx-collections:$ktxCollectionsVersion"
 	api "io.github.libktx:ktx-box2d:$ktxBox2dVersion"
 	api "io.github.libktx:ktx-log:$ktxLogVersion"
+	api 'io.github.libktx:ktx-freetype:1.10.0-b1'
 }

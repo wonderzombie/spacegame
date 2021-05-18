@@ -26,7 +26,17 @@ class SpaceActor(
   }
 
   override fun draw(batch: Batch?, parentAlpha: Float) {
-    batch?.draw(texture.asset, x, y, width, height)
+    batch?.draw(
+      texture.asset,
+      x,
+      y,
+      width,
+      height,
+      width,
+      height,
+      scaleX,
+      scaleY,
+    )
     super.draw(batch, parentAlpha)
   }
 

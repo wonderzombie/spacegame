@@ -1,9 +1,8 @@
 import PlayerInputListener.State.IDLE
-import PlayerInputListener.State.MOVING
+import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.Input.Keys
 import com.badlogic.gdx.scenes.scene2d.InputEvent
 import com.badlogic.gdx.scenes.scene2d.InputListener
-import com.badlogic.gdx.scenes.scene2d.actions.Actions
 
 class PlayerInputListener(private val player: SpaceActor) : InputListener() {
   private var state: State = IDLE
@@ -19,14 +18,30 @@ class PlayerInputListener(private val player: SpaceActor) : InputListener() {
     event ?: return false
     if (player.hasActions()) return false
 
-    when (event.keyCode) {
-      Keys.UP -> player.addAction(Actions.moveBy(0f, player.speed)).also { this.state = MOVING }
-      Keys.RIGHT -> player.addAction(Actions.moveBy(player.speed, 0f)).also { this.state = MOVING }
-      Keys.DOWN -> player.addAction(Actions.moveBy(0f, -player.speed)).also { this.state = MOVING }
-      Keys.LEFT -> player.addAction(Actions.moveBy(-player.speed, 0f)).also { this.state = MOVING }
-      Keys.SPACE -> player.fireMissile(player.x + (player.width / 4), player.top)
+    if (keycode in movementKeys || movementKeys.any { Gdx.input.isKeyPressed(it) }) {
+      val x = when (keycode) {
+        Keys.LEFT -> -player.speed
+        Keys.RIGHT -> player.speed
+        else -> 0
+      }.toFloat()
+
+      val y = when (keycode) {
+        Keys.UP -> player.speed
+        Keys.DOWN -> -player.speed
+        else -> 0
+      }.toFloat()
+      player.moveBy(x, y)
+      state = State.MOVING
+
+      return true
     }
-    return true
+
+    if (keycode == Keys.SPACE) {
+      player.fireMissile(player.x, player.y)
+      return true
+    }
+
+    return false
   }
 
   override fun keyUp(event: InputEvent?, keycode: Int): Boolean {
