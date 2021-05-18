@@ -32,10 +32,6 @@ class SpaceActor(
       y,
       width,
       height,
-      width,
-      height,
-      scaleX,
-      scaleY,
     )
     super.draw(batch, parentAlpha)
   }

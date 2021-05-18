@@ -45,11 +45,15 @@ class FirstScreen(
     }
   }
 
+  private val numEnemies: Int = 6
+  private val minWorldWidth: Float = 240f
+  private val minWorldHeight: Float = 180f
+
   private lateinit var gameState: GameState
   private lateinit var player: SpaceActor
 
   private val camera = OrthographicCamera()
-  private val viewport = ExtendViewport(320f, 240f, camera)
+  private val viewport = ExtendViewport(minWorldWidth, minWorldHeight, camera)
   private val stage = Stage(viewport)
 
   private var enemyBombs: GdxArray<SpaceActor> = GdxArray()
@@ -76,25 +80,21 @@ class FirstScreen(
 
     stage.actors {
       actor(SpaceActor(playerShipTex, PLAYER, missileTex)).also { player = it }
-      repeat(6) { i ->
-        actor(SpaceActor(enemyShipTex, ENEMY, bomb = bombTex)) {
-          setPosition(i * 25f, 100f)
-          addAction(enemyPatrol())
-        }
-      }
     }
+    spawnEnemies()
     stage.addListener(PlayerInputListener(player))
     stage.isDebugAll = true
 
-    check(stage.actors.size > 6)
+    check(stage.actors.size > numEnemies)
   }
 
-  private fun enemyPatrol() = Actions.forever(
-    Actions.sequence(
-      Actions.repeat(200, Actions.moveBy(0.05f, 0f)),
-      Actions.repeat(200, Actions.moveBy(-0.05f, 0f))
+  private fun enemyPatrol(inc: Float) =
+    Actions.forever(
+      Actions.sequence(
+        Actions.repeat(200, Actions.moveBy(0.05f * inc, 0f)),
+        Actions.repeat(200, Actions.moveBy(-0.05f * inc, 0f))
+      )
     )
-  )
 
   private fun Actor.getRect(rect: Rectangle): Rectangle =
     rect.set(this.x, this.y, this.width, this.height)
@@ -107,33 +107,14 @@ class FirstScreen(
     val spaceActors: Map<Kind, List<SpaceActor>> =
       stage.actors.filterIsInstance<SpaceActor>().groupBy { it.kind }
 
-    val collisions = mutableMapOf<SpaceActor, SpaceActor>()
-    spaceActors[MISSILE]?.onEach { missile ->
-      projectleRect.set(missile.x, missile.y, missile.width, missile.height)
-      spaceActors[ENEMY]?.onEach { enemy ->
-        actorRect.set(enemy.x, enemy.y, enemy.width, enemy.height)
-        if (actorRect.overlaps(projectleRect)) collisions += missile to enemy
-      }
+    if (spaceActors[ENEMY]?.isEmpty() != false) {
+      spaceActors[BOMB]?.onEach { it.remove(); enemyBombs.removeValue(it, true) }
+      spaceActors[MISSILE]?.onEach { it.remove(); player.missiles.removeValue(it, true) }
+      currentLevel += 1
+      spawnEnemies(inc = currentLevel.toFloat())
     }
 
-    spaceActors[BOMB]?.onEach { bomb ->
-      bomb.getRect(projectleRect)
-      if (projectleRect.overlaps(player.getRect(actorRect))) {
-        handlePlayerHit(player, bomb)
-      }
-    }
-
-    collisions.onEach { (projectile, target) ->
-      projectile.isVisible = false
-      maybeBlowUp(target)
-      stage.actors.removeValue(projectile, true)
-      stage.actors.removeValue(target, true)
-      player.missiles.removeValue(projectile, true)
-    }
-
-    cleanupProjectiles()
-
-    lastBombTime = maybeDropBomb(lastBombTime)
+    updateProjectiles(spaceActors, projectleRect, actorRect)
 
     with(stage) {
       act(delta)
@@ -145,24 +126,68 @@ class FirstScreen(
     }
   }
 
+  private fun updateProjectiles(
+    spaceActors: Map<Kind, List<SpaceActor>>,
+    projectleRect: Rectangle,
+    actorRect: Rectangle
+  ) {
+    val missileHits = mutableMapOf<SpaceActor, SpaceActor>()
+    spaceActors[MISSILE]?.onEach { missile ->
+      projectleRect.set(missile.x, missile.y, missile.width, missile.height)
+      spaceActors[ENEMY]?.onEach { enemy ->
+        actorRect.set(enemy.x, enemy.y, enemy.width, enemy.height)
+        if (actorRect.overlaps(projectleRect)) missileHits += missile to enemy
+      }
+    }
+
+    spaceActors[BOMB]?.onEach { bomb ->
+      bomb.getRect(projectleRect)
+      if (projectleRect.overlaps(player.getRect(actorRect))) {
+        handlePlayerHit(player, bomb)
+        enemyBombs.removeValue(bomb, true)
+      }
+    }
+
+    missileHits.onEach { (missile, target) ->
+      missile.isVisible = false
+      maybeBlowUp(target)
+      cleanUp(missile, target)
+    }
+
+    expireProjectiles()
+
+    lastBombTime = maybeDropBomb(lastBombTime)
+  }
+
+  private fun cleanUp(missile: SpaceActor, target: SpaceActor) {
+    stage.actors.removeValue(target, true)
+
+    stage.actors.removeValue(missile, true)
+    player.missiles.removeValue(missile, true)
+  }
+
+  private fun spawnEnemies(
+    count: Int = numEnemies,
+    x: Float = 25f,
+    y: Float = 100f,
+    inc: Float = 1f
+  ) {
+    stage.actors {
+      repeat(count) { i ->
+        actor(SpaceActor(enemyShipTex, ENEMY, bomb = bombTex)) {
+          setPosition(i * x, y)
+          addAction(enemyPatrol(inc))
+        }
+      }
+    }
+  }
+
   private fun drawHud(batch: Batch) {
     font.asset.draw(
       batch,
-      "SCORE: $enemiesDestroyed",
-      5f,
-      130f
-    )
-    font.asset.draw(
-      batch,
-      "LEVEL $currentLevel",
+      "SCORE: $enemiesDestroyed | LEVEL: $currentLevel | LIVES: $remainingLives",
       60f,
-      130f
-    )
-    font.asset.draw(
-      batch,
-      "LIVES: $remainingLives",
-      120f,
-      130f
+      minWorldHeight - 5
     )
   }
 
@@ -197,7 +222,8 @@ class FirstScreen(
   }
 
   private fun maybeDropBomb(lastBombTime: Long): Long {
-    if (TimeUtils.timeSinceMillis(lastBombTime) >= enemyBombInterval) {
+    val adjustedInterval = enemyBombInterval - (250 * currentLevel)
+    if (TimeUtils.timeSinceMillis(lastBombTime) >= adjustedInterval) {
       stage.actors.filterIsInstance<SpaceActor>().filter { it.kind == ENEMY }.random().apply {
         dropBomb(x + (width / 2), y)?.let { enemyBombs.add(it) }
       }
@@ -206,12 +232,13 @@ class FirstScreen(
     return lastBombTime
   }
 
-  private fun cleanupProjectiles() {
+  private fun expireProjectiles() {
     val projectiles: List<SpaceActor> = stage.actors.filterIsInstance<SpaceActor>()
       .filter { it.kind in Kind.ProjectileKinds }
 
     projectiles.onEach {
       if (it.y > stage.height) {
+        it.remove()
         stage.actors.removeValue(it, true)
         when (it.kind) {
           MISSILE -> player.missiles.removeValue(it, true)
