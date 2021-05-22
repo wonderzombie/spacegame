@@ -82,7 +82,10 @@ class FirstScreen(
     camera.update()
 
     stage.actors {
-      actor(SpaceActor(playerShipTex, PLAYER, missileTex)).also { player = it }
+      actor(SpaceActor(playerShipTex, PLAYER, missileTex)).also {
+        player = it
+        player.x = (minWorldWidth / 2) - (player.width / 2)
+      }
     }
     spawnEnemies()
     stage.isDebugAll = true
@@ -166,14 +169,20 @@ class FirstScreen(
 
   private fun handlePlayerInput() {
     movementKeys.find { Gdx.input.isKeyPressed(it) }?.let {
-      val baseSpeed = player.width * 1.5f
+      val baseSpeed = player.width * 3f
       val adjustedSpeed = Gdx.graphics.deltaTime * (if (it == Keys.LEFT) -baseSpeed else baseSpeed)
       player.x += adjustedSpeed
     }
 
+    if (player.x <= 0) {
+      player.x = 0f
+    } else if (player.right >= minWorldWidth) {
+      player.x = minWorldWidth - player.width - 1
+    }
+
     if (Gdx.input.isKeyJustPressed(Keys.SPACE) && playerMissiles.size < 3) {
       val offset = player.width / 2
-      player.fireMissile(player.x + offset, player.top)
+      playerMissiles.add(player.fireMissile(player.x + offset, player.top))
     }
   }
 
