@@ -1,41 +1,50 @@
 buildscript {
-	repositories {
-		mavenLocal()
-		mavenCentral()
-		google()
-		gradlePluginPortal()
-		maven { url 'https://oss.sonatype.org/content/repositories/snapshots/' }
-	}
-	dependencies {
-		classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
-		classpath "org.wisepersist:gwt-gradle-plugin:$gwtPluginVersion"
-	}
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        google()
+        gradlePluginPortal()
+        maven { url 'https://oss.sonatype.org/content/repositories/snapshots/' }
+    }
+    dependencies {
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlinVersion"
+        classpath "org.wisepersist:gwt-gradle-plugin:$gwtPluginVersion"
+    }
+}
+
+plugins {
+	id 'application'
 }
 
 allprojects {
-	apply plugin: 'eclipse'
-	apply plugin: 'idea'
+    apply plugin: 'eclipse'
+    apply plugin: 'idea'
+    apply plugin: 'application'
 }
 
 configure(subprojects) {
-	apply plugin: 'java-library'
-	apply plugin: 'kotlin'
-	sourceCompatibility = 15.0
-	compileJava {
-		options.incremental = true
-	}
+    apply plugin: 'java-library'
+    apply plugin: 'kotlin'
+    sourceCompatibility = 15.0
+    compileJava {
+        options.incremental = true
+    }
 }
 
 subprojects {
-	version = '0.0.1'
-	ext.appName = 'SpaceGame'
-	repositories {
-		mavenLocal()
-		mavenCentral()
-		gradlePluginPortal()
-		maven { url 'https://oss.sonatype.org/content/repositories/snapshots/' }
-		maven { url 'https://jitpack.io' }
-	}
+    version = '0.0.1'
+    ext.appName = 'SpaceGame'
+    repositories {
+        mavenLocal()
+        mavenCentral()
+        gradlePluginPortal()
+        maven { url 'https://oss.sonatype.org/content/repositories/snapshots/' }
+        maven { url 'https://jitpack.io' }
+    }
 }
 
 eclipse.project.name = 'SpaceGame' + '-parent'
+
+application {
+    mainClass.set("game.lwjgl3.Lwjgl3Launcher")
+}

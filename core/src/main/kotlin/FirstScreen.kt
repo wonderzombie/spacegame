@@ -1,9 +1,11 @@
 import FirstScreen.GameState.GAME_OVER
+import FirstScreen.GameState.RUNNING
 import FirstScreen.Kind.BOMB
 import FirstScreen.Kind.ENEMY
 import FirstScreen.Kind.MISSILE
 import FirstScreen.Kind.PLAYER
 import com.badlogic.gdx.Gdx
+import com.badlogic.gdx.Input.Keys
 import com.badlogic.gdx.Screen
 import com.badlogic.gdx.graphics.Color
 import com.badlogic.gdx.graphics.OrthographicCamera
@@ -45,25 +47,26 @@ class FirstScreen(
     }
   }
 
-  private val numEnemies: Int = 6
   private val minWorldWidth: Float = 240f
   private val minWorldHeight: Float = 180f
-
-  private lateinit var gameState: GameState
-  private lateinit var player: SpaceActor
 
   private val camera = OrthographicCamera()
   private val viewport = ExtendViewport(minWorldWidth, minWorldHeight, camera)
   private val stage = Stage(viewport)
 
-  private var enemyBombs: GdxArray<SpaceActor> = GdxArray()
-
   private val defaultLives: Int = 5
   private val enemyBombInterval: Long = 5 * 1000
+  private val numEnemies: Int = 6
+  private val enemyBombs: GdxArray<SpaceActor> = GdxArray()
+  private val playerMissiles: GdxArray<SpaceActor> = GdxArray()
 
+  private lateinit var player: SpaceActor
+
+  private var gameState: GameState = RUNNING
   private var remainingLives: Int = defaultLives
   private var currentLevel: Int = 1
   private var enemiesDestroyed: Int = 0
+
   private var lastBombTime: Long = enemyBombInterval * 2
 
 
@@ -82,7 +85,6 @@ class FirstScreen(
       actor(SpaceActor(playerShipTex, PLAYER, missileTex)).also { player = it }
     }
     spawnEnemies()
-    stage.addListener(PlayerInputListener(player))
     stage.isDebugAll = true
 
     check(stage.actors.size > numEnemies)
@@ -100,21 +102,57 @@ class FirstScreen(
     rect.set(this.x, this.y, this.width, this.height)
 
 
+  private val movementKeys = listOf(Keys.LEFT, Keys.RIGHT)
+
   override fun render(delta: Float) {
+    when (gameState) {
+      RUNNING -> renderGame(delta)
+      GAME_OVER -> renderGameOver(delta)
+    }
+  }
+
+  private fun renderGameOver(delta: Float) {
+    stage.batch.use {
+      drawHud(it)
+      drawGameOver(it)
+    }
+
+    if (Gdx.input.isKeyJustPressed(Keys.ENTER)) {
+      gameState = RUNNING
+      player.isVisible = true
+      spawnEnemies()
+      player.clearActions()
+    }
+  }
+
+  private fun drawGameOver(batch: Batch) {
+    font.asset.draw(batch, "GAME OVER", 50f, 100f)
+    font.asset.draw(batch, "Press enter to play again", 50f, 100f - font.asset.capHeight)
+  }
+
+  private fun renderGame(delta: Float) {
     val actorRect = Rectangle()
     val projectleRect = Rectangle()
+
+    handlePlayerInput()
 
     val spaceActors: Map<Kind, List<SpaceActor>> =
       stage.actors.filterIsInstance<SpaceActor>().groupBy { it.kind }
 
-    if (spaceActors[ENEMY]?.isEmpty() != false) {
-      spaceActors[BOMB]?.onEach { it.remove(); enemyBombs.removeValue(it, true) }
-      spaceActors[MISSILE]?.onEach { it.remove(); player.missiles.removeValue(it, true) }
-      currentLevel += 1
-      spawnEnemies(inc = currentLevel.toFloat())
-    }
-
     updateProjectiles(spaceActors, projectleRect, actorRect)
+
+    if (spaceActors[ENEMY]?.isEmpty() != false || gameState == GAME_OVER) {
+      spaceActors[BOMB]?.onEach { it.remove(); enemyBombs.removeValue(it, true) }
+      spaceActors[MISSILE]?.onEach { it.remove(); playerMissiles.removeValue(it, true) }
+      if (gameState == GAME_OVER) {
+        spaceActors[ENEMY]?.onEach { it.remove() }
+        remainingLives = defaultLives
+        currentLevel = 1
+      } else {
+        currentLevel += 1
+        spawnEnemies(inc = currentLevel.toFloat())
+      }
+    }
 
     with(stage) {
       act(delta)
@@ -123,6 +161,19 @@ class FirstScreen(
 
     stage.batch.use {
       drawHud(it)
+    }
+  }
+
+  private fun handlePlayerInput() {
+    movementKeys.find { Gdx.input.isKeyPressed(it) }?.let {
+      val baseSpeed = player.width * 1.5f
+      val adjustedSpeed = Gdx.graphics.deltaTime * (if (it == Keys.LEFT) -baseSpeed else baseSpeed)
+      player.x += adjustedSpeed
+    }
+
+    if (Gdx.input.isKeyJustPressed(Keys.SPACE) && playerMissiles.size < 3) {
+      val offset = player.width / 2
+      player.fireMissile(player.x + offset, player.top)
     }
   }
 
@@ -140,30 +191,33 @@ class FirstScreen(
       }
     }
 
-    spaceActors[BOMB]?.onEach { bomb ->
-      bomb.getRect(projectleRect)
-      if (projectleRect.overlaps(player.getRect(actorRect))) {
-        handlePlayerHit(player, bomb)
-        enemyBombs.removeValue(bomb, true)
-      }
-    }
-
     missileHits.onEach { (missile, target) ->
       missile.isVisible = false
       maybeBlowUp(target)
       cleanUp(missile, target)
     }
 
-    expireProjectiles()
+    spaceActors[BOMB]?.onEach { bomb ->
+      bomb.getRect(projectleRect)
+      if (projectleRect.overlaps(player.getRect(actorRect))) {
+        enemyBombs.removeValue(bomb, true)
+        handlePlayerHit(player, bomb)
+      }
+    }
+
+    if (remainingLives == 0) {
+      handlePlayerLoss(player)
+    }
 
     lastBombTime = maybeDropBomb(lastBombTime)
+
+    cleanUpProjectiles()
   }
 
   private fun cleanUp(missile: SpaceActor, target: SpaceActor) {
     stage.actors.removeValue(target, true)
-
     stage.actors.removeValue(missile, true)
-    player.missiles.removeValue(missile, true)
+    playerMissiles.removeValue(missile, true)
   }
 
   private fun spawnEnemies(
@@ -172,6 +226,7 @@ class FirstScreen(
     y: Float = 100f,
     inc: Float = 1f
   ) {
+
     stage.actors {
       repeat(count) { i ->
         actor(SpaceActor(enemyShipTex, ENEMY, bomb = bombTex)) {
@@ -185,28 +240,25 @@ class FirstScreen(
   private fun drawHud(batch: Batch) {
     font.asset.draw(
       batch,
-      "SCORE: $enemiesDestroyed | LEVEL: $currentLevel | LIVES: $remainingLives",
+      "SCORE: ${enemiesDestroyed * 10} | LEVEL: $currentLevel | LIVES: $remainingLives",
       60f,
       minWorldHeight - 5
     )
   }
 
-  private fun handlePlayerHit(player: SpaceActor, bomb: SpaceActor) {
+  private fun handlePlayerHit(player: SpaceActor, bomb: SpaceActor): Boolean {
     enemyBombs.removeValue(bomb, true)
     stage.actors.removeValue(bomb, true)
 
     remainingLives -= 1
     player.clearActions()
     player.addAction(playerHit())
-
-    if (remainingLives == 0) {
-      handlePlayerLoss(player)
-    }
+    return remainingLives == 0
   }
 
   private fun playerHit() = Actions.repeat(
     5,
-    Actions.sequence(Actions.color(Color.RED, 1f), Actions.color(Color.WHITE, 1f))
+    Actions.sequence(Actions.color(Color.RED, 0.1f), Actions.color(Color.WHITE, 0.1f))
   )
 
   enum class GameState {
@@ -222,9 +274,12 @@ class FirstScreen(
   }
 
   private fun maybeDropBomb(lastBombTime: Long): Long {
+    val enemies = stage.actors.filterIsInstance<SpaceActor>().filter { it.kind == ENEMY }
+    if (enemies.isEmpty()) return lastBombTime
+
     val adjustedInterval = enemyBombInterval - (250 * currentLevel)
     if (TimeUtils.timeSinceMillis(lastBombTime) >= adjustedInterval) {
-      stage.actors.filterIsInstance<SpaceActor>().filter { it.kind == ENEMY }.random().apply {
+      enemies.random().apply {
         dropBomb(x + (width / 2), y)?.let { enemyBombs.add(it) }
       }
       return TimeUtils.millis()
@@ -232,16 +287,17 @@ class FirstScreen(
     return lastBombTime
   }
 
-  private fun expireProjectiles() {
-    val projectiles: List<SpaceActor> = stage.actors.filterIsInstance<SpaceActor>()
+  private fun cleanUpProjectiles() {
+    val projectiles: List<SpaceActor> = stage.actors
+      .filterIsInstance<SpaceActor>()
       .filter { it.kind in Kind.ProjectileKinds }
 
     projectiles.onEach {
-      if (it.y > stage.height) {
+      if (it.y > stage.height || it.y < 0) {
         it.remove()
         stage.actors.removeValue(it, true)
         when (it.kind) {
-          MISSILE -> player.missiles.removeValue(it, true)
+          MISSILE -> playerMissiles.removeValue(it, true)
           BOMB -> enemyBombs.removeValue(it, true)
         }
         logger.info("removed $it ${it.kind}")
