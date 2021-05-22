@@ -15,12 +15,14 @@ import com.badlogic.gdx.graphics.g2d.BitmapFont
 import com.badlogic.gdx.math.Interpolation
 import com.badlogic.gdx.math.Rectangle
 import com.badlogic.gdx.scenes.scene2d.Actor
+import com.badlogic.gdx.scenes.scene2d.Group
 import com.badlogic.gdx.scenes.scene2d.Stage
 import com.badlogic.gdx.scenes.scene2d.actions.Actions
 import com.badlogic.gdx.utils.Logger
 import com.badlogic.gdx.utils.Logger.INFO
 import com.badlogic.gdx.utils.TimeUtils
 import com.badlogic.gdx.utils.viewport.ExtendViewport
+import ktx.actors.keepWithinParent
 import ktx.actors.then
 import ktx.assets.Asset
 import ktx.collections.GdxArray
@@ -55,8 +57,8 @@ class FirstScreen(
   private val stage = Stage(viewport)
 
   private val defaultLives: Int = 5
-  private val enemyBombInterval: Long = 5 * 1000
-  private val numEnemies: Int = 6
+  private val enemyBombInterval: Long = 3 * 1000
+  private val numEnemies: Int = 8
   private val enemyBombs: GdxArray<SpaceActor> = GdxArray()
   private val playerMissiles: GdxArray<SpaceActor> = GdxArray()
 
@@ -69,6 +71,10 @@ class FirstScreen(
 
   private var lastBombTime: Long = enemyBombInterval * 2
 
+  enum class GameState {
+    RUNNING,
+    GAME_OVER
+  }
 
   override fun show() {
     Gdx.input.inputProcessor = stage
@@ -85,10 +91,10 @@ class FirstScreen(
       actor(SpaceActor(playerShipTex, PLAYER, missileTex)).also {
         player = it
         player.x = (minWorldWidth / 2) - (player.width / 2)
+        it.keepWithinParent()
       }
     }
     spawnEnemies()
-    stage.isDebugAll = true
 
     check(stage.actors.size > numEnemies)
   }
@@ -130,14 +136,20 @@ class FirstScreen(
 
   private fun drawGameOver(batch: Batch) {
     font.asset.draw(batch, "GAME OVER", 50f, 100f)
-    font.asset.draw(batch, "Press enter to play again", 50f, 100f - font.asset.capHeight)
+    font.asset.draw(
+      batch,
+      "Your score was ${enemiesDestroyed * 10}",
+      50f,
+      100f - font.asset.capHeight
+    )
+    font.asset.draw(batch, "Press enter to play again", 50f, 100f - font.asset.capHeight * 2)
   }
 
   private fun renderGame(delta: Float) {
     val actorRect = Rectangle()
     val projectleRect = Rectangle()
 
-    handlePlayerInput()
+    handlePlayerInput(delta)
 
     val spaceActors: Map<Kind, List<SpaceActor>> =
       stage.actors.filterIsInstance<SpaceActor>().groupBy { it.kind }
@@ -167,11 +179,11 @@ class FirstScreen(
     }
   }
 
-  private fun handlePlayerInput() {
+  private fun handlePlayerInput(delta: Float) {
     movementKeys.find { Gdx.input.isKeyPressed(it) }?.let {
       val baseSpeed = player.width * 3f
-      val adjustedSpeed = Gdx.graphics.deltaTime * (if (it == Keys.LEFT) -baseSpeed else baseSpeed)
-      player.x += adjustedSpeed
+      val adjustedSpeed = delta * (if (it == Keys.LEFT) -baseSpeed else baseSpeed)
+      player.addAction(Actions.moveBy(adjustedSpeed, 0f))
     }
 
     if (player.x <= 0) {
@@ -231,16 +243,17 @@ class FirstScreen(
 
   private fun spawnEnemies(
     count: Int = numEnemies,
-    x: Float = 25f,
+    x: Float = 10f,
     y: Float = 100f,
+    spacing: Float = 20f,
     inc: Float = 1f
   ) {
-
     stage.actors {
       repeat(count) { i ->
         actor(SpaceActor(enemyShipTex, ENEMY, bomb = bombTex)) {
-          setPosition(i * x, y)
-          addAction(enemyPatrol(inc))
+          setPosition(i * spacing + x, y)
+          addAction(enemyPatrol(inc + 5))
+          it.keepWithinParent()
         }
       }
     }
@@ -269,12 +282,6 @@ class FirstScreen(
     5,
     Actions.sequence(Actions.color(Color.RED, 0.1f), Actions.color(Color.WHITE, 0.1f))
   )
-
-  enum class GameState {
-    RUNNING,
-    NEW_LEVEL,
-    GAME_OVER
-  }
 
   private fun handlePlayerLoss(player: SpaceActor) {
     player.isVisible = false

@@ -1,10 +1,12 @@
 import FirstScreen.Kind
 import FirstScreen.Kind.BOMB
+import FirstScreen.Kind.ENEMY
 import FirstScreen.Kind.MISSILE
 import FirstScreen.Kind.PLAYER
 import com.badlogic.gdx.graphics.Texture
 import com.badlogic.gdx.graphics.g2d.Batch
 import com.badlogic.gdx.scenes.scene2d.Actor
+import com.badlogic.gdx.scenes.scene2d.Group
 import com.badlogic.gdx.scenes.scene2d.actions.Actions
 import ktx.assets.Asset
 import ktx.collections.GdxArray
@@ -26,7 +28,7 @@ class SpaceActor(
 
   override fun draw(batch: Batch?, parentAlpha: Float) {
     batch?.let {
-      var oldColor = it.color
+      val oldColor = it.color
       it.color = this.color
       it.draw(
         texture.asset,
@@ -41,7 +43,7 @@ class SpaceActor(
   }
 
   fun dropBomb(initX: Float, initY: Float): SpaceActor? {
-    if (bomb == null || kind == PLAYER) return null
+    if (bomb == null || kind != ENEMY) return null
     val newBomb: SpaceActor
     stage.actors {
       actor(SpaceActor(texture = bomb, kind = BOMB)) {
